@@ -1,0 +1,180 @@
+.patient-dashboard {
+    display: flex;
+    min-height: 100vh;
+    background-color: #f4f7f6;
+    font-family: 'Comfortaa', sans-serif;
+}
+
+/* Копіюємо стилі Sidebar з DoctorAccount */
+.sidebar {
+    width: 260px;
+    background-color: #1a2523;
+    /* Onyx Green */
+    color: white;
+    display: flex;
+    flex-direction: column;
+    padding: 30px 20px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+}
+
+.sidebar-header h3 {
+    font-family: 'Caveat', cursive;
+    font-size: 2.2rem;
+    margin-bottom: 5px;
+}
+
+.sidebar-nav li:hover,
+.sidebar-nav li.active {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Контентна область */
+.dashboard-content {
+    flex-grow: 1;
+    padding: 40px;
+}
+
+.appointments-section,
+.patients-section,
+.settings-section {
+    background: white;
+    padding: 30px;
+    border-radius: 20px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+}
+
+/* Таблиці */
+.appointments-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.appointments-table th {
+    text-align: left;
+    padding: 15px;
+    border-bottom: 2px solid #f0f0f0;
+    color: #888;
+}
+
+.appointments-table td {
+    padding: 18px 15px;
+    border-bottom: 1px solid #f9f9f9;
+}
+
+/* Статуси */
+.status-label {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.status-planned {
+    background: #fff9e6;
+    color: #d4a017;
+}
+
+.status-completed {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.status-expired {
+    background: #f5f6fa;
+    color: #7f8c8d;
+    border: 1px solid #dcdde1;
+}
+
+/* Кнопка виходу */
+.logout-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    padding: 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: auto;
+}
+
+.chat-window {
+    width: 350px;
+    height: 450px;
+    background: white;
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1001;
+}
+
+.chat-header {
+    background: #1a2523;
+    color: white;
+    padding: 15px;
+    border-radius: 20px 20px 0 0;
+}
+
+.chat-body {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.message {
+    max-width: 80%;
+    padding: 10px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+}
+
+.sent {
+    align-self: flex-end;
+    background: #e8f0ee;
+    color: #1a2523;
+}
+
+.received {
+    align-self: flex-start;
+    background: #f0f0f0;
+}
+
+.chat-footer {
+    padding: 15px;
+    display: flex;
+    gap: 10px;
+    border-top: 1px solid #eee;
+}
+
+.chat-footer input {
+    flex-grow: 1;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+/* Адаптивність */
+@media (max-width: 1024px) {
+    .patient-dashboard {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+    }
+
+    .sidebar-nav ul {
+        display: flex;
+        overflow-x: auto;
+        gap: 10px;
+    }
+}
