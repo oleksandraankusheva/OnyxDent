@@ -6,6 +6,7 @@ const LoginPage = ({ onBack, onLogin }) => {
     const [login, setLogin] = useState('+38');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [isSubmittingForgot, setIsSubmittingForgot] = useState(false);
 
     const handlePhoneChange = (e) => {
         const value = e.target.value;
@@ -29,17 +30,38 @@ const LoginPage = ({ onBack, onLogin }) => {
             const data = await response.json();
 
             if (response.ok) {
-                // БЕЗПЕКА ТА СЕСІЯ: Надійно зберігаємо JWT та профайл у браузері
                 localStorage.setItem('token', data.token);
                 localStorage.setItem('user', JSON.stringify(data.user));
-
-                // Викликаємо функцію входу з роллю, яку повернула БД
                 onLogin(data.user.role, data.user);
             } else {
                 alert(data.message);
             }
         } catch (error) {
             alert("Сервер недоступний");
+        }
+    };
+
+    // НОВА ФУНКЦІЯ: Запит на відновлення пароля
+    const handleForgotPassword = async () => {
+        if (login.length < 13) {
+            alert("Будь ласка, введіть коректний номер телефону у полі 'Логін' для відновлення пароля.");
+            return;
+        }
+
+        try {
+            setIsSubmittingForgot(true);
+            const response = await fetch('http://localhost:5000/api/auth/forgot-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: login })
+            });
+
+            const data = await response.json();
+            alert(data.message);
+        } catch (error) {
+            alert("Не вдалося надіслати запит на відновлення. Сервер недоступний.");
+        } finally {
+            setIsSubmittingForgot(false);
         }
     };
 
@@ -108,6 +130,27 @@ const LoginPage = ({ onBack, onLogin }) => {
                                 </button>
                             </div>
                         </div>
+
+                        {/* НОВА КНОПКА: Скидання пароля */}
+                        <div style={{ textAlign: 'right', marginTop: '-10px', marginBottom: '20px' }}>
+                            <button
+                                type="button"
+                                onClick={handleForgotPassword}
+                                disabled={isSubmittingForgot}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: '#3498db',
+                                    cursor: 'pointer',
+                                    fontSize: '0.85rem',
+                                    textDecoration: 'underline',
+                                    padding: 0
+                                }}
+                            >
+                                {isSubmittingForgot ? 'Надсилання запиту...' : 'Забули пароль?'}
+                            </button>
+                        </div>
+
                         <button type="submit" className="form-submit-btn login-btn">
                             Увійти
                         </button>

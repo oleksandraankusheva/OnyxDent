@@ -4,8 +4,8 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
-const http = require('http'); // Для Socket.io
-const { Server } = require('socket.io'); // Для Socket.io
+const http = require('http'); 
+const { Server } = require('socket.io'); 
 const path = require('path');
 const helmet = require('helmet'); // ЕЛЕМЕНТ БЕЗПЕКИ 1: Захист заголовків від XSS та експлуатацій
 require('dotenv').config();
@@ -201,6 +201,111 @@ app.post('/api/login', async (req, res) => {
         res.json({ token, user: { id: user.id, name: user.full_name, role: user.role, phone: user.phone } });
     } catch (err) {
         res.status(500).send('Помилка сервера');
+    }
+});
+
+// 1. Ендпоінт для клієнта: подача заявки «Забули пароль»
+app.post('/api/auth/forgot-password', async (req, res) => {
+    const { phone } = req.body;
+
+    try {
+        // Перевіряємо, чи існує такий користувач у системі
+        const userCheck = await pool.query('SELECT id FROM users WHERE phone = $1', [phone]);
+        
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ 
+                message: 'Користувача з таким номером телефону не знайдено в системі.' 
+            });
+        }
+
+        const patientId = userCheck.rows[0].id;
+
+        // Перевіряємо, чи не надіслано таку заявку раніше
+        const activeReq = await pool.query(
+            "SELECT id FROM admin_notifications WHERE patient_id = $1 AND type = 'reset_password'",
+            [patientId]
+        );
+
+        if (activeReq.rows.length > 0) {
+            return res.status(400).json({ 
+                message: 'Заявку на скидання пароля вже надіслано адміністратору. Очікуйте на підтвердження.' 
+            });
+        }
+
+        // Вставляємо запит у таблицю сповіщень для адміністратора
+        await pool.query(
+            "INSERT INTO admin_notifications (patient_id, type, created_at) VALUES ($1, 'reset_password', NOW())",
+            [patientId]
+        );
+
+        res.json({ 
+            message: 'Заявку на скидання пароля успішно надіслано адміністратору.' 
+        });
+
+    } catch (err) {
+        console.error("Помилка forgot-password:", err);
+        res.status(500).json({ error: 'Внутрішня помилка сервера' });
+    }
+});
+
+
+// 2. Ендпоінт для адміна: підтвердження скидання пароля
+app.put('/api/admin/notifications/reset-password/:id', verifyToken, async (req, res) => {
+    const notificationId = req.params.id;
+    const { patientId } = req.body;
+
+    try {
+        // Крок А: Генеруємо новий випадковий пароль із 8 символів
+        const generatedPassword = Math.random().toString(36).slice(-8);
+
+        // Крок Б: Отримуємо номер телефону пацієнта
+        const userRes = await pool.query('SELECT phone FROM users WHERE id = $1', [patientId]);
+        if (userRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Пацієнта не знайдено' });
+        }
+        const patientPhone = userRes.rows[0].phone;
+
+        // Крок В: ЛОГІКА ПЕРЕЗАПИСУ В ОДИН РЯДОК У ФАЙЛІ generated_passwords.txt
+        const filePath = path.join(__dirname, 'generated_passwords.txt');
+        const newRecord = `Тел: ${patientPhone} | Пароль: ${generatedPassword}`;
+        
+        let fileLines = [];
+        
+        // Якщо файл вже існує, зчитуємо його та фільтруємо
+        if (fs.existsSync(filePath)) {
+            const fileContent = fs.readFileSync(filePath, 'utf8');
+            // Розбиваємо файл на масив рядків і очищаємо від порожніх пробілів
+            fileLines = fileContent.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+            
+            // Видаляємо стару згадку про цей телефон, якщо вона там була
+            fileLines = fileLines.filter(line => !line.includes(`Тел: ${patientPhone}`));
+        }
+        
+        // Додаємо оновлений запис у масив рядків
+        fileLines.push(newRecord);
+        
+        // Перезаписуємо файл усім оновленим масивом, об'єднаним через перенос рядка
+        fs.writeFileSync(filePath, fileLines.join('\n') + '\n', 'utf8');
+        console.log(`[FILE UPDATE SUCCESS] Дані для телефону ${patientPhone} успішно перезаписано.`);
+
+        // Крок Г: Хешуємо новий пароль для бази даних
+        const hashedNewPassword = await bcrypt.hash(generatedPassword, 10);
+
+        // Крок ⏳: Оновлюємо значення в PostgreSQL
+        await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashedNewPassword, patientId]);
+
+        // Крок Д: Очищаємо оброблену нотифікацію
+        await pool.query('DELETE FROM admin_notifications WHERE id = $1', [notificationId]);
+
+        // Повертаємо згенерований пароль на фронтенд адміна для виведення в alert
+        res.json({ 
+            message: 'Пароль успішно оновлено.',
+            newPassword: generatedPassword 
+        });
+
+    } catch (err) {
+        console.error("Помилка на сервері при reset-password:", err);
+        res.status(500).json({ error: 'Не вдалося скинути пароль' });
     }
 });
 

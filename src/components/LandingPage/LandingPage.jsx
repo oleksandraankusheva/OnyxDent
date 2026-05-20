@@ -9,12 +9,14 @@ import AdminAccount from '../AdminAccount/AdminAccount';
 import logo from '../../public/Logo-2.svg';
 import heroImg from '../../public/dentist_photo.jpg';
 import devlogo from '../../public/AO-preview.png';
+import bot from '../../public/qrcode_bot.png';
 
 const LandingPage = () => {
     const [view, setView] = useState('landing');
     const [activeSection, setActiveSection] = useState('home');
     const [user, setUser] = useState(null);
     const [loadingSession, setLoadingSession] = useState(true); // НОВЕ: Запобігає бліканню інтерфейсу при перевірці сесії
+    const [isQrModalOpen, setIsQrModalOpen] = useState(false);
 
     const [currentSlide, setCurrentSlide] = useState(0);
     const [currentDoctorSlide, setCurrentDoctorSlide] = useState(0);
@@ -322,14 +324,52 @@ const LandingPage = () => {
 
             <footer className="main-footer">
                 <div className="footer-content">
-                    <div className="footer-column"><h4>Контакти:</h4><p>+38 (0XX) XXX-XX-XX</p><p>info@onyxdent.com</p></div>
-                    <div className="footer-column"><h4>Адреса:</h4><p>м. Черкаси,</p><p>вул. Центральна, 1</p></div>
-                    <div className="footer-column"><h4>Ми в соц.мережах:</h4><div className="social-links"><p><span>Instagram</span></p><p><span>Facebook</span></p></div></div>
+                    <div className="footer-column">
+                        <h4>Контакти:</h4>
+                        <p>+38 (0XX) XXX-XX-XX</p>
+                        <p>info@onyxdent.com</p>
+                    </div>
+                    <div className="footer-column">
+                        <h4>Адреса:</h4>
+                        <p>м. Черкаси,</p>
+                        <p>вул. Центральна, 1</p>
+                    </div>
+
+                    <div className="footer-column">
+                        <h4>Телеграм-бот</h4>
+                        <div className="bot-preview-container" onClick={() => setIsQrModalOpen(true)}>
+                            <img
+                                src={bot}
+                                alt="Telegram Bot QR"
+                                className="bot-qr-small"
+                            />
+                            <p className="bot-hint">Натисніть, щоб збільшити</p>
+                        </div>
+                    </div>
                 </div>
+
                 <div className="footer-bottom">
-                    <p className="created-by"><img src={devlogo} alt="dev-logo" className="dev-mini-photo" /></p>
+                    <p className="created-by">
+                        <img src={devlogo} alt="dev-logo" className="dev-mini-photo" />
+                    </p>
                 </div>
             </footer>
+
+            {isQrModalOpen && (
+                <div className="qr-modal-overlay" onClick={() => setIsQrModalOpen(false)}>
+                    <div className="qr-modal-content" onClick={(e) => e.stopPropagation()}>
+                        <button className="qr-modal-close" onClick={() => setIsQrModalOpen(false)}>&times;</button>
+                        <img
+                            src={bot}
+                            alt="Telegram Bot QR Full"
+                            className="bot-qr-large"
+                        />
+                        <h3>Наш Telegram-асистент</h3>
+                        <p>Відскануйте код для швидкого запису та сповіщень</p>
+                    </div>
+                </div>
+            )}
+
             {showScrollTop && <button className="scroll-top-btn" onClick={scrollToTop}>&#8593;</button>}
         </div>
     );
