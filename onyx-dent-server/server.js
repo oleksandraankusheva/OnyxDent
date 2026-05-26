@@ -120,13 +120,17 @@ app.post('/api/telegram-webhook', async (req, res) => {
                         const appointments = await pool.query(
                             "SELECT a.appointment_date, s.title FROM appointments a JOIN services s ON a.service_id = s.id WHERE a.patient_id = $1 AND a.status = 'planned' ORDER BY a.appointment_date LIMIT 3", [userId]
                         );
-                        let response = `✅ Ваш пароль: <code>${password}</code>\n🔔 <b>Сповіщення активовано!</b>\n\n`;
+                        
+                        // ОНОВЛЕНО: Тепер змінна password загорнута в тег <tg-spoiler>
+                        let response = `✅ Ваш пароль: <tg-spoiler>${password}</tg-spoiler>\n🔔 <b>Сповіщення активовано!</b>\n\n`;
+                        
                         if (appointments.rows.length > 0) {
                             response += "<b>Найближчі візити:</b>\n" + appointments.rows.map(a => `📅 ${new Date(a.appointment_date).toLocaleString('uk-UA')}\n🦷 ${a.title}`).join('\n\n');
                         } else { response += "ℹ️ Запланованих візитів немає."; }
                         await sendTelegramMessage(chatId, response);
                     } else {
-                        await sendTelegramMessage(chatId, `✅ Ваш пароль: <code>${password}</code>\n\n(Профіль очікує активації адміном)`);
+                        // ОНОВЛЕНО: Тут також ховаємо під спойлер для нових профілів
+                        await sendTelegramMessage(chatId, `✅ Ваш пароль: <tg-spoiler>${password}</tg-spoiler>\n\n(Профіль очікує активації адміном)`);
                     }
                 } else { await sendTelegramMessage(chatId, "❌ Користувача не знайдено."); }
             }
@@ -145,20 +149,80 @@ io.on('connection', (socket) => {
         console.log(`Користувач ${userId} увійшов у свою кімнату чату`);
     });
 
-    socket.on('send_message', async (data) => {
+    // 1. Оновлення збереження повідомлення (повертаємо згенерований ID)
+socket.on('send_message', async (data) => {
         const { senderId, receiverId, text } = data;
         try {
-            // Зберігаємо повідомлення в БД
-            await pool.query(
-                "INSERT INTO messages (sender_id, receiver_id, message_text) VALUES ($1, $2, $3)",
+            // 1. Зберігаємо повідомлення в БД та отримуємо його ID
+            const result = await pool.query(
+                "INSERT INTO messages (sender_id, receiver_id, message_text) VALUES ($1, $2, $3) RETURNING id",
                 [senderId, receiverId, text]
             );
-            // Відправляємо отримувачу в реальному часі
-            io.to(receiverId).emit('receive_message', data);
+            const insertedId = result.rows[0].id;
+            
+            // Передаємо повідомлення разом з його ID назад клієнтам у браузері
+            const payload = { ...data, id: insertedId, isEdited: false };
+            io.to(receiverId).emit('receive_message', payload);
+            socket.emit('message_sent_success', { temporaryTime: data.time, realId: insertedId });
+
+            // 2. ТРИГЕР ТЕЛЕГРАМУ: Надсилаємо сповіщення в Telegram отримувачу, якщо він підключив бота
+            try {
+                const infoRes = await pool.query(`
+                    SELECT 
+                        r.telegram_chat_id AS receiver_tg_id,
+                        s.full_name AS sender_name
+                    FROM users s
+                    CROSS JOIN users r
+                    WHERE s.id = $1 AND r.id = $2
+                `, [senderId, receiverId]);
+
+                if (infoRes.rows.length > 0) {
+                    const { receiver_tg_id, sender_name } = infoRes.rows[0];
+                    
+                    // Якщо в отримувача заповнений telegram_chat_id — відправляємо сповіщення
+                    if (receiver_tg_id) {
+                        const tgMessage = `💬 <b>Нове повідомлення в чаті OnyxDent!</b>\n\n` +
+                                          `👤 <b>Відправник:</b> ${sender_name}\n` +
+                                          `✉️ <b>Текст:</b> ${text.length > 100 ? text.substring(0, 100) + '...' : text}\n\n` +
+                                          `👉 Перейдіть в особистий кабінет на сайті, щоб відповісти.`;
+                        
+                        await sendTelegramMessage(receiver_tg_id, tgMessage);
+                    }
+                }
+            } catch (tgErr) {
+                console.error("Помилка відправки чат-сповіщення в Telegram:", tgErr);
+            }
+
         } catch (err) {
             console.error("Помилка збереження повідомлення:", err);
         }
     });
+
+// 2. Нова подія: Редагування повідомлення через WebSockets
+socket.on('edit_message', async (data) => {
+    const { id, receiverId, text } = data;
+    try {
+        await pool.query(
+            "UPDATE messages SET message_text = $1, is_edited = TRUE WHERE id = $2",
+            [text, id]
+        );
+        io.to(receiverId).emit('message_edited', { id, text });
+    } catch (err) {
+        console.error("Помилка редагування повідомлення:", err);
+    }
+});
+
+// 3. Нова подія: Видалення повідомлення через WebSockets
+socket.on('delete_message', async (data) => {
+    const { id, receiverId } = data;
+    try {
+        await pool.query("DELETE FROM messages WHERE id = $1", [id]);
+        // Сповіщаємо отримувача про видалення
+        io.to(receiverId).emit('message_deleted', { id });
+    } catch (err) {
+        console.error("Помилка видалення повідомлення:", err);
+    }
+});
 
     socket.on('disconnect', () => {
         console.log('Користувач відключився від чату');
@@ -174,8 +238,8 @@ app.get('/api/chat/history/:userId1/:userId2', verifyToken, async (req, res) => 
     const { userId1, userId2 } = req.params;
     try {
         const result = await pool.query(`
-            SELECT sender_id as "senderId", receiver_id as "receiverId", 
-                   message_text as text, sent_at as time
+            SELECT id, sender_id as "senderId", receiver_id as "receiverId", 
+                   message_text as text, sent_at as time, is_edited as "isEdited"
             FROM messages 
             WHERE (sender_id = $1 AND receiver_id = $2) 
                OR (sender_id = $2 AND receiver_id = $1)
@@ -751,16 +815,6 @@ app.get('/api/admin/doctors', verifyToken, requireAdmin, async (req, res) => {
         res.status(500).json({ error: "Помилка сервера при завантаженні списку лікарів" });
     }
 });
-
-
-// --- ЗАГАЛЬНІ ЕНДПОЇНТИ ---
-app.get('/api/services', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT id, title, price, duration_minutes FROM services ORDER BY title ASC');
-        res.json(result.rows);
-    } catch (err) { res.status(500).send('Помилка сервера'); }
-});
-
 app.post('/api/admin/services', verifyToken, requireAdmin, async (req, res) => {
     const { title, price, duration_minutes } = req.body;
     if (!title || !price) return res.status(400).json({ error: "Назва та ціна є обов'язковими" });
@@ -780,6 +834,99 @@ app.put('/api/admin/services/:id', verifyToken, requireAdmin, async (req, res) =
         res.json({ message: "Оновлено", service: result.rows[0] });
     } catch (err) { res.status(500).json({ error: "Помилка" }); }
 });
+
+// Ендпоінт створення нового адміністратора чинним адміністратором
+app.post('/api/admin/add-admin', verifyToken, requireAdmin, async (req, res) => {
+    const { fullName, phone } = req.body;
+
+    if (!fullName || !phone) {
+        return res.status(400).json({ message: "Будь ласка, заповніть усі обов'язкові поля" });
+    }
+
+    try {
+        await pool.query('BEGIN');
+
+        // Перевіряємо, чи немає користувача з таким номером телефону вже в базі
+        const userCheck = await pool.query("SELECT id FROM users WHERE phone = $1", [phone]);
+        if (userCheck.rows.length > 0) {
+            await pool.query('ROLLBACK');
+            return res.status(400).json({ message: "Користувач з таким номером телефону вже існує у системі" });
+        }
+
+        // Генеруємо випадковий пароль із 8 символів
+        const autoPassword = Math.random().toString(36).slice(-8);
+        const hashedPassword = await bcrypt.hash(autoPassword, 10);
+
+        // Вставляємо нового користувача з рольовою міткою 'admin'
+        await pool.query(
+            "INSERT INTO users (full_name, phone, password_hash, role) VALUES ($1, $2, $3, 'admin')",
+            [fullName, phone, hashedPassword]
+        );
+
+        // Логуємо інформацію у файл для передачі облікових даних
+        const logLine = `Адміністратор: ${fullName} | Тел: ${phone} | Пароль: ${autoPassword}\n`;
+        fs.appendFileSync(path.join(__dirname, 'generated_passwords.txt'), logLine);
+
+        await pool.query('COMMIT');
+        
+        return res.status(201).json({ 
+            message: "Адміністратора успішно створено", 
+            temporaryPassword: autoPassword 
+        });
+
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        console.error("Помилка при створенні адміна:", err.message);
+        res.status(500).json({ message: "Внутрішня помилка сервера при реєстрації адміністратора" });
+    }
+});
+
+// Ендпоінт самостійного видалення акаунта адміністратора
+app.delete('/api/admin/delete-me', verifyToken, requireAdmin, async (req, res) => {
+    const { password } = req.body;
+    const userId = req.user.id; // Беремо ID з токена авторизації
+
+    if (!password) {
+        return res.status(400).json({ message: "Введіть пароль для підтвердження видалення" });
+    }
+
+    try {
+        // 1. Отримуємо поточний хеш пароля з бази даних
+        const userRes = await pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+        if (userRes.rows.length === 0) {
+            return res.status(444).json({ message: "Користувача не знайдено" });
+        }
+
+        // 2. Перевіряємо пароль
+        const isMatch = await bcrypt.compare(password, userRes.rows[0].password_hash);
+        if (!isMatch) {
+            return res.status(401).json({ message: "Невірний пароль! Спроба видалення відхилена" });
+        }
+
+        // 3. Перевіряємо, чи це не єдиний адмін у системі (опціональний захист системи)
+        const adminCountRes = await pool.query("SELECT COUNT(*) FROM users WHERE role = 'admin'");
+        if (parseInt(adminCountRes.rows[0].count) <= 1) {
+            return res.status(400).json({ message: "Неможливо видалити акаунт. Ви єдиний адміністратор у системі!" });
+        }
+
+        // 4. Видаляємо обліковий запис
+        await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+
+        res.json({ message: "Ваш обліковий запис успішно видалено" });
+    } catch (err) {
+        console.error("Помилка при самовидаленні адміна:", err.message);
+        res.status(500).json({ message: "Внутрішня помилка сервера" });
+    }
+});
+
+// --- ЗАГАЛЬНІ ЕНДПОЇНТИ ---
+app.get('/api/services', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT id, title, price, duration_minutes FROM services ORDER BY title ASC');
+        res.json(result.rows);
+    } catch (err) { res.status(500).send('Помилка сервера'); }
+});
+
 
 app.put('/api/user/change-password', verifyToken, async (req, res) => {
     const { userId, oldPassword, newPassword } = req.body;
