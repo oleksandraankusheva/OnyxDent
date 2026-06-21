@@ -261,8 +261,29 @@ app.post('/api/login', async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password_hash);
         if (!isMatch) return res.status(401).json({ message: 'Неправильний пароль' });
 
+        // НОВА ЛОГІКА: Перевіряємо, чи пароль є тимчасовим (чи є запис у файлі generated_passwords.txt)
+        let isTemporaryPassword = false;
+        const filePath = path.join(__dirname, 'generated_passwords.txt');
+        if (fs.existsSync(filePath)) {
+            const logContent = fs.readFileSync(filePath, 'utf8');
+            if (logContent.includes(`Тел: ${phone}`)) {
+                isTemporaryPassword = true;
+            }
+        }
+
         const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '8h' });
-        res.json({ token, user: { id: user.id, name: user.full_name, role: user.role, phone: user.phone } });
+        
+        // Передаємо прапорець isTemporaryPassword на фронтенд
+        res.json({ 
+            token, 
+            user: { 
+                id: user.id, 
+                name: user.full_name, 
+                role: user.role, 
+                phone: user.phone,
+                isTemporaryPassword: isTemporaryPassword // <-- Нове поле
+            } 
+        });
     } catch (err) {
         res.status(500).send('Помилка сервера');
     }
@@ -927,20 +948,48 @@ app.get('/api/services', async (req, res) => {
     } catch (err) { res.status(500).send('Помилка сервера'); }
 });
 
-
 app.put('/api/user/change-password', verifyToken, async (req, res) => {
     const { userId, oldPassword, newPassword } = req.body;
     try {
-        const userRes = await pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
-        const isMatch = await bcrypt.compare(oldPassword, userRes.rows[0].password_hash);
+        // 1. Отримуємо поточний хеш пароля та телефон користувача
+        const userRes = await pool.query('SELECT phone, password_hash FROM users WHERE id = $1', [userId]);
+        if (userRes.rows.length === 0) return res.status(404).json({ message: 'Користувача не знайдено' });
+
+        const user = userRes.rows[0];
+
+        // 2. Перевіряємо чи збігається старий пароль
+        const isMatch = await bcrypt.compare(oldPassword, user.password_hash);
         if (!isMatch) return res.status(401).json({ message: 'Невірний поточний пароль' });
 
+        // 3. Хешуємо та оновлюємо новий пароль у базі даних PostgreSQL
         const hashed = await bcrypt.hash(newPassword, 10);
         await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashed, userId]);
-        res.json({ message: 'Пароль змінено успішно' });
-    } catch (err) { res.status(500).send('Помилка'); }
-});
 
+        const filePath = path.join(__dirname, 'generated_passwords.txt');
+        if (fs.existsSync(filePath)) {
+            const fileContent = fs.readFileSync(filePath, 'utf8');
+            
+            // Розбиваємо вміст файлу на рядки й очищаємо від пробілів
+            let fileLines = fileContent.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+            
+            // Фільтруємо масив рядків, видаляючи будь-яку згадку про телефон цього користувача
+            const filteredLines = fileLines.filter(line => !line.includes(`Тел: ${user.phone}`));
+            
+            // Якщо якісь рядки були видалені, переписуємо файл оновленими даними
+            if (fileLines.length !== filteredLines.length) {
+                // Збираємо рядки назад до купи з переносом рядка
+                fs.writeFileSync(filePath, filteredLines.join('\n') + '\n', 'utf8');
+                console.log(`[SECURITY] Телефон ${user.phone} змінив пароль. Запис видалено з generated_passwords.txt.`);
+            }
+        }
+        // =========================================================================
+
+        res.json({ message: 'Пароль змінено успішно' });
+    } catch (err) { 
+        console.error("Помилка при зміні пароля:", err);
+        res.status(500).send('Помилка сервера'); 
+    }
+});
 
 // Автоматичне очищення заявок (24 год)
 setInterval(async () => {

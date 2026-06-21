@@ -11,19 +11,21 @@ import AppointmentModal from '../AppointmentModal';
 
 const DoctorAccount = ({ user, onLogout }) => {
     const [activeTab, setActiveTab] = useState('list');
-    const [selectedChat, setSelectedChat] = useState(null); // Для вибору пацієнта в чаті
+    const [selectedChat, setSelectedChat] = useState(null); 
     const [showModal, setShowModal] = useState(false);
     const [modalMode, setModalMode] = useState('create'); 
     
-    // НОВЕ: Стейт для завантаження реальних послуг з бази даних
+    // Стейт для відображення попередження про тимчасовий пароль лікаря
+    const [showSecurityWarning, setShowSecurityWarning] = useState(false);
+    
     const [services, setServices] = useState([]);
 
     const [formData, setFormData] = useState({
         isNewPatient: false,
         patientPhone: '',
         patientName: '',
-        doctorId: user.id, // ID поточного лікаря
-        serviceId: '', // Початково порожньо, щоб лікар обрав сам
+        doctorId: user.id, 
+        serviceId: '', 
         date: ''
     });
 
@@ -31,7 +33,13 @@ const DoctorAccount = ({ user, onLogout }) => {
         day: 'numeric', month: 'long', year: 'numeric', weekday: 'long'
     });
 
-    // НОВЕ: Завантажуємо реальні послуги клініки при старті кабінету лікаря
+    // Перевірка безпеки облікового запису при завантаженні панелі
+    useEffect(() => {
+        if (user && user.isTemporaryPassword) {
+            setShowSecurityWarning(true);
+        }
+    }, [user]);
+
     useEffect(() => {
         const token = localStorage.getItem('token');
         fetch('http://localhost:5000/api/services', {
@@ -41,7 +49,6 @@ const DoctorAccount = ({ user, onLogout }) => {
             .then(data => {
                 if (Array.isArray(data)) {
                     setServices(data);
-                    // Якщо послуги завантажились, ставимо першу за замовчуванням у форму
                     if (data.length > 0) {
                         setFormData(prev => ({ ...prev, serviceId: data[0].id.toString() }));
                     }
@@ -94,7 +101,6 @@ const DoctorAccount = ({ user, onLogout }) => {
             patientPhone: '',
             patientName: '',
             doctorId: user.id,
-            // Ставимо ID першої послуги з масиву, якщо вони завантажились
             serviceId: services.length > 0 ? services[0].id.toString() : '1',
             date: selectedTime
         });
@@ -127,6 +133,47 @@ const DoctorAccount = ({ user, onLogout }) => {
                 </header>
 
                 <div className="tab-container">
+                    {/* КІБЕРБЕЗПЕКА: БАНЕР-ЗАСТЕРЕЖЕННЯ ПРО НЕОБХІДНІСТЬ ЗМІНИ ТИМЧАСОВОГО ПАРОЛЯ */}
+                    {showSecurityWarning && (
+                        <div style={{
+                            background: '#fff3cd',
+                            color: '#856404',
+                            padding: '15px 20px',
+                            borderRadius: '12px',
+                            marginBottom: '20px',
+                            border: '1px solid #ffeeba',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                            fontFamily: 'inherit'
+                        }}>
+                            <div style={{ fontSize: '0.95rem', lineHeight: '1.4' }}>
+                                <strong>🚨 Режим безпеки:</strong> Ви увійшли під тимчасовим паролем персоналу OnyxDent. Оновіть пароль на вкладці налаштувань, щоб захистити персональну медичну систему від несанкціонованого доступу.
+                            </div>
+                            <button 
+                                onClick={() => {
+                                    setActiveTab('settings'); // Перемикаємо вкладку на налаштування
+                                    setShowSecurityWarning(false);
+                                }}
+                                style={{
+                                    background: '#e74c3c',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '8px 15px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontWeight: 'bold',
+                                    marginLeft: '15px',
+                                    whiteSpace: 'nowrap',
+                                    transition: 'background 0.2s'
+                                }}
+                            >
+                                Налаштувати
+                            </button>
+                        </div>
+                    )}
+
                     {activeTab === 'list' && (
                         <AppointmentsList 
                             doctorId={user.id} 
@@ -164,10 +211,7 @@ const DoctorAccount = ({ user, onLogout }) => {
                 formData={formData}             
                 setFormData={setFormData}       
                 doctors={[]}                    
-                
-                // ОНОВЛЕНО: Передаємо реальний масив послуг у пропси модалки
                 services={services} 
-                
                 mode={modalMode} 
                 userRole="doctor"               
                 onOpenMedicalCard={(appointment) => {

@@ -20,6 +20,14 @@ const AdminAccount = ({ user, onLogout }) => {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [isAddingAdmin, setIsAddingAdmin] = useState(false);
     const [newAdmin, setNewAdmin] = useState({ fullName: '', phone: '+380' });
+    
+    // Стейт для банера безпеки (тимчасовий пароль)
+    const [showSecurityWarning, setShowSecurityWarning] = useState(false);
+
+    // ОНОВЛЕНО: Стейт для зміни пароля у вигляді об'єкта, як у пацієнта
+    const [passwordData, setPasswordData] = useState({ oldPassword: '', newPassword: '' });
+    const [passwordMessage, setPasswordMessage] = useState('');
+
     const [formData, setFormData] = useState({
         isNewPatient: false,
         patientPhone: '',
@@ -28,14 +36,48 @@ const AdminAccount = ({ user, onLogout }) => {
         serviceId: '',
         date: '',
         requestId: null,
-        isFromSite: false // Прапорець для позначення заявки з сайту
+        isFromSite: false 
     });
 
     useEffect(() => {
         fetchAppointments();
         fetchDoctors();
         fetchServices();
-    }, []);
+        
+        // Перевірка, чи поточний адмін сидить на системному паролі
+        if (user && user.isTemporaryPassword) {
+            setShowSecurityWarning(true);
+        }
+    }, [user]);
+
+    // ОНОВЛЕНО: Функція обробки зміни пароля з використанням об'єкта passwordData
+    const handlePasswordChange = async (e) => {
+        e.preventDefault();
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch('http://localhost:5000/api/user/change-password', {
+                method: 'PUT',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ 
+                    userId: user.id, 
+                    oldPassword: passwordData.oldPassword, 
+                    newPassword: passwordData.newPassword 
+                })
+            });
+            const data = await response.json();
+            setPasswordMessage(data.message);
+            if (response.ok) { 
+                setPasswordData({ oldPassword: '', newPassword: '' }); // Очищення форми
+                setShowSecurityWarning(false);
+            }
+        } catch (err) {
+            setPasswordMessage("Помилка з'єднання з сервером");
+        }
+    };
+
     const handleAddAdminSubmit = async (e) => {
         e.preventDefault();
         const token = localStorage.getItem('token');
@@ -134,9 +176,8 @@ const AdminAccount = ({ user, onLogout }) => {
         const autoPassword = Math.random().toString(36).slice(-8);
         try {
             const token = localStorage.getItem('token');
-            // Перевіряємо, чи ми схвалюємо саме публічний запит з сайту (без id користувача)
             const endpoint = formData.isFromSite
-                ? 'http://localhost:5000/api/admin/add-visit' // Для заявок без акаунта
+                ? 'http://localhost:5000/api/admin/add-visit' 
                 : 'http://localhost:5000/api/admin/add-visit';
 
             const response = await fetch(endpoint, {
@@ -161,7 +202,6 @@ const AdminAccount = ({ user, onLogout }) => {
         }
     };
 
-    // Обробка кліку на запис з сайту або кабінету пацієнта всередині SystemRequestsTab
     const handleProcessRequest = (request, isSiteRequest = false) => {
         setModalMode('create');
         setFormData({
@@ -217,11 +257,9 @@ const AdminAccount = ({ user, onLogout }) => {
 
     const handleSelfDelete = async (e) => {
         e.preventDefault();
-
         if (!window.confirm("Ви впевнені, що хочете НАЗАВЖДИ видалити свій профіль адміністратора? Цю дію неможливо скасувати!")) {
             return;
         }
-
         const token = localStorage.getItem('token');
         try {
             const res = await fetch('http://localhost:5000/api/admin/delete-me', {
@@ -232,12 +270,10 @@ const AdminAccount = ({ user, onLogout }) => {
                 },
                 body: JSON.stringify({ password: confirmPassword })
             });
-
             const data = await res.json();
-
             if (res.ok) {
                 alert("Ваш акаунт видалено. Зараз вас буде розлогінено.");
-                onLogout(); // Викликаємо ваш стандартний вихід із системи
+                onLogout(); 
             } else {
                 setStatusMsg({ text: data.message || "Помилка видалення", type: 'error' });
             }
@@ -257,7 +293,6 @@ const AdminAccount = ({ user, onLogout }) => {
                 <nav className="admin-nav">
                     <ul>
                         <li className={activeTab === 'appointments' ? 'active' : ''} onClick={() => setActiveTab('appointments')}>Журнал візитів</li>
-                        {/* ОНОВЛЕНО: ТУТ ОДНА ЄДИНА ВКЛАДКА ДЛЯ ВСІХ ЗАЯВОК */}
                         <li className={activeTab === 'system_requests' ? 'active' : ''} onClick={() => setActiveTab('system_requests')}>Заявки користувачів</li>
                         <li className={activeTab === 'doctors' ? 'active' : ''} onClick={() => setActiveTab('doctors')}>Управління лікарями</li>
                         <li className={activeTab === 'schedule' ? 'active' : ''} onClick={() => setActiveTab('schedule')}>Загальний розклад</li>
@@ -275,6 +310,46 @@ const AdminAccount = ({ user, onLogout }) => {
                         {activeTab === 'appointments' ? "Журнал візитів" : activeTab === 'system_requests' ? "Заявки користувачів" : "Керування клінікою"}
                     </h1>
                 </header>
+
+                {/* БАНЕР БЕЗПЕКИ ПРО ТИМЧАСОВИЙ ПАРОЛЬ ДЛЯ АДМІНІСТРАТОРА */}
+                {showSecurityWarning && (
+                    <div style={{
+                        background: '#fff3cd',
+                        color: '#856404',
+                        padding: '15px 20px',
+                        borderRadius: '12px',
+                        marginBottom: '20px',
+                        border: '1px solid #ffeeba',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                        fontFamily: 'inherit'
+                    }}>
+                        <div style={{ fontSize: '0.95rem', lineHeight: '1.4' }}>
+                            <strong>🚨 Первинний вхід:</strong> Ви використовуєте автоматично згенерований тимчасовий пароль адміністратора. Перейдіть у вкладку «Управління адмінами», щоб встановити постійний надійний пароль.
+                        </div>
+                        <button 
+                            onClick={() => {
+                                setActiveTab('manage_admins');
+                                setShowSecurityWarning(false);
+                            }}
+                            style={{
+                                background: '#e74c3c',
+                                color: 'white',
+                                border: 'none',
+                                padding: '8px 15px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontWeight: 'bold',
+                                marginLeft: '15px',
+                                whiteSpace: 'nowrap'
+                            }}
+                        >
+                            Змінити зараз
+                        </button>
+                    </div>
+                )}
 
                 {activeTab === 'appointments' && (
                     <section className="admin-table-section">
@@ -314,18 +389,17 @@ const AdminAccount = ({ user, onLogout }) => {
                 {activeTab === 'doctors' && (
                     <DoctorManagement
                         appointments={appointments}
-                        // ОСЬ НОВИЙ ОБРОБНИК, ЯКИЙ МИ ДОДАЄМО:
                         onTimeSlotSelect={({ doctorId, selectedDate }) => {
                             setModalMode('create');
                             setFormData({
-                                isNewPatient: true, // За замовчуванням адмін введе ім'я та телефон вручну
+                                isNewPatient: true, 
                                 patientPhone: '',
                                 patientName: '',
-                                doctorId: doctorId, // Автоматично підставляємо лікаря, чий календар дивилися
+                                doctorId: doctorId, 
                                 serviceId: '',
-                                date: selectedDate.substring(0, 16) // Обрізаємо секунди для сумісності з datetime-local (YYYY-MM-DDTHH:mm)
+                                date: selectedDate.substring(0, 16) 
                             });
-                            setShowModal(true); // Відкриваємо модалку запису
+                            setShowModal(true); 
                         }}
                     />
                 )}
@@ -341,19 +415,56 @@ const AdminAccount = ({ user, onLogout }) => {
 
                 {activeTab === 'manage_admins' && (
                     <div className="admin-tab-content">
-                        <div style={{ display: 'flex', justifyWith: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                            <h3>Керування адміністраторами</h3>
+                        
+                        {/* ОНОВЛЕНО: ФОРМА ЗМІНИ ПАРОЛЯ АДМІНІСТРАТОРА ПОВНІСТЮ ІДЕНТИЧНА ДО ПАЦІЄНТА */}
+                        <h3>Змінити пароль</h3>
+                        <form onSubmit={handlePasswordChange} className="settings-form" style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '400px', marginBottom: '40px' }}>
+                            <div className="form-group">
+                                <label style={{ display: 'block', marginBottom: '5px', marginTop:'5px', fontSize: '0.9rem' }}>Поточний пароль</label>
+                                <input 
+                                    type="password" 
+                                    className="form-input" 
+                                    placeholder="Введіть старий пароль"
+                                    value={passwordData.oldPassword}
+                                    onChange={(e) => setPasswordData({ ...passwordData, oldPassword: e.target.value })}
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem' }}>Новий пароль</label>
+                                <input 
+                                    type="password" 
+                                    className="form-input" 
+                                    placeholder="Введіть новий пароль"
+                                    value={passwordData.newPassword}
+                                    onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                                />
+                            </div>
+                            <button type="submit" className="save-btn" style={{ padding: '12px', background: '#1a2523', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
+                                Оновити пароль
+                            </button>
+                        </form>
+
+                        {passwordMessage && (
+                            <p style={{ marginTop: '-30px', marginBottom: '30px', fontWeight: 'bold', fontSize: '0.9rem', color: passwordMessage.includes('успішно') ? '#27ae60' : '#e74c3c' }}>
+                                {passwordMessage}
+                            </p>
+                        )}
+
+                        <hr style={{ margin: '30px 0', border: 'none', borderTop: '1px solid #eee' }} />
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <h3>Керування адміністраторами клініки</h3>
                             <button className="add-btn" onClick={() => setIsAddingAdmin(!isAddingAdmin)}>
                                 {isAddingAdmin ? 'Закрити форму' : '➕ Додати нового адміністратора'}
                             </button>
                         </div>
 
                         {isAddingAdmin && (
-                            <div style={{ background: '#white', padding: '25px', borderRadius: '20px', marginBottom: '20px', boxShadow: '0 5px 15px rgba(0, 0, 0, 0.05)' }}>
+                            <div style={{ background: 'white', padding: '25px', borderRadius: '20px', marginBottom: '20px', boxShadow: '0 5px 15px rgba(0, 0, 0, 0.05)' }}>
                                 <h4 style={{ color: 'var(--dark-green)', marginBottom: '15px', fontFamily: 'Comfortaa' }}>Реєстрація нового адміна клініки</h4>
                                 <form onSubmit={handleAddAdminSubmit} style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', marginTop: '10px' }}>
                                     <input
-                                        type="text" placeholder="ПІБ Адміністратора" className="form-input" style={{ padding: '10px', borderRadius: '8px', border: '1px solid #ccc', minWidth: '250px' }} required
+                                        type="text" placeholder="ПІБ Администратора" className="form-input" style={{ padding: '10px', borderRadius: '8px', border: '1px solid #ccc', minWidth: '250px' }} required
                                         value={newAdmin.fullName} onChange={e => setNewAdmin({ ...newAdmin, fullName: e.target.value })}
                                     />
                                     <input
@@ -370,6 +481,7 @@ const AdminAccount = ({ user, onLogout }) => {
                                 💡 <b>Інформація:</b> Усі створені адміністратори мають рівні з вами права доступу до системи.
                             </p>
                         </div>
+
                         <div style={{ marginTop: '50px', padding: '25px', borderRadius: '20px', border: '1px dashed #e74c3c', background: '#fff5f5' }}>
                             <h4 style={{ color: '#e74c3c', marginBottom: '10px', fontFamily: 'Comfortaa' }}>🛑 Небезпечна зона</h4>
                             <p style={{ color: '#666', fontSize: '0.9rem', marginBottom: '15px' }}>
